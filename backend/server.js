@@ -6,81 +6,113 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// ===============================
-// CRC16 FUNCTION (VERY IMPORTANT)
-// ===============================
-function crc16ccitt(str) {
-  let crc = 0xffff;
-  for (let c = 0; c < str.length; c++) {
-    crc ^= str.charCodeAt(c) << 8;
-    for (let i = 0; i < 8; i++) {
-      crc = (crc & 0x8000) !== 0 ? (crc << 1) ^ 0x1021 : crc << 1;
+/* ==============================
+   CRC16-CCITT (EMV REQUIRED)
+============================== */
+function crc16(payload) {
+  let crc = 0xFFFF;
+
+  for (let i = 0; i < payload.length; i++) {
+    crc ^= payload.charCodeAt(i) << 8;
+
+    for (let j = 0; j < 8; j++) {
+      if ((crc & 0x8000) !== 0) {
+        crc = (crc << 1) ^ 0x1021;
+      } else {
+        crc <<= 1;
+      }
     }
   }
-  return (crc & 0xffff).toString(16).toUpperCase().padStart(4, "0");
+
+  return (crc & 0xFFFF)
+    .toString(16)
+    .toUpperCase()
+    .padStart(4, "0");
 }
 
-// ===============================
-// GENERATE REAL KHQR STRING
-// ===============================
+/* ==============================
+   FORMAT EMV FIELD
+============================== */
+function formatField(id, value) {
+  return id + value.length.toString().padStart(2, "0") + value;
+}
+
+/* ==============================
+   GENERATE REAL KHQR
+============================== */
 function generateKHQR(amount) {
-  const merchant = process.env.MERCHANT_ID;
-  const store = process.env.STORE_NAME;
+  const merchantId = process.env.MERCHANT_ID;
+  const storeName = process.env.STORE_NAME || "MADETH STORE";
+  const city = process.env.CITY || "PHNOM PENH";
 
-  const amountStr = amount.toFixed(2);
+  const amountStr = Number(amount).toFixed(2);
 
+  // ----- Merchant Account Info (Tag 29) -----
+  const bakongAccountInfo =
+    formatField("00", "A000000677010111") +
+    formatField("01", merchantId);
+
+  const merchantAccountField = formatField("29", bakongAccountInfo);
+
+  // ----- Build Payload -----
   let payload =
-    "000201" +                  // Payload Format
-    "010212" +                  // Dynamic QR
-    "2937" +                    // Merchant Account Info
-    "0016A000000677010111" +    // Bakong ID
-    "01" + merchant.length.toString().padStart(2, "0") + merchant +
-    "52045999" +                // Merchant Category
-    "5303840" +                 // Currency USD
-    "54" + amountStr.length.toString().padStart(2, "0") + amountStr +
-    "5802KH" +                  // Country
-    "59" + store.length.toString().padStart(2, "0") + store +
-    "6007PHNOMPE" +             // City
-    "6304";
+    formatField("00", "01") +        // Payload Format Indicator
+    formatField("01", "12") +        // Dynamic QR
+    merchantAccountField +
+    formatField("52", "5999") +      // Merchant Category Code
+    formatField("53", "840") +       // Currency (840 = USD, 116 = KHR)
+    formatField("54", amountStr) +   // Transaction Amount
+    formatField("58", "KH") +        // Country Code
+    formatField("59", storeName) +   // Merchant Name
+    formatField("60", city) +        // Merchant City
+    "6304";                          // CRC placeholder
 
-  const crc = crc16ccitt(payload);
+  const crc = crc16(payload);
 
   return payload + crc;
 }
 
-// ===============================
-// HEALTH CHECK
-// ===============================
+/* ==============================
+   ROUTES
+============================== */
+
 app.get("/", (req, res) => {
-  res.send("🚀 Real KHQR Generator Running");
+  res.send("🚀 100% Working KHQR Backend Running");
 });
 
-// ===============================
-// POST /api/pay
-// ===============================
 app.post("/api/pay", (req, res) => {
-  const { amount } = req.body;
+  try {
+    const { amount } = req.body;
 
-  if (!amount || amount <= 0) {
-    return res.status(400).json({
-      error: "Amount must be greater than 0"
+    if (!amount || amount <= 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Amount must be greater than 0"
+      });
+    }
+
+    const qrString = generateKHQR(amount);
+
+    res.json({
+      success: true,
+      amount: Number(amount),
+      qrString: qrString
+    });
+
+  } catch (error) {
+    res.status(500).json({
+      success: false,
+      message: error.message
     });
   }
-
-  const qrString = generateKHQR(Number(amount));
-
-  res.json({
-    success: true,
-    amount: Number(amount),
-    qrString
-  });
 });
 
-// ===============================
-// START SERVER
-// ===============================
+/* ==============================
+   START SERVER
+============================== */
+
 const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => {
-  console.log(`🔥 Server running on port ${PORT}`);
+  console.log(`🔥 KHQR Server running on port ${PORT}`);
 });
