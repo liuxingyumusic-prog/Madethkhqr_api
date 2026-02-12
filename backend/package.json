@@ -1,7 +1,6 @@
 {
-  "name": "real-khqr-generator",
+  "name": "khqr-backend",
   "version": "1.0.0",
-  "description": "100% Working Real KHQR Generator",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
