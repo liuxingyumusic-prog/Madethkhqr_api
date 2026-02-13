@@ -1,7 +1,7 @@
 {
   "name": "khqr-backend",
   "version": "1.0.0",
-  "description": "KHQR Backend No Database",
+  "description": "KHQR Working Backend",
   "main": "server.js",
   "scripts": {
     "start": "node server.js"
