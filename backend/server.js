@@ -1,21 +1,17 @@
 require("dotenv").config();
 const express = require("express");
-const mongoose = require("mongoose");
 const QRCode = require("qrcode");
 const crc = require("crc");
 const { v4: uuidv4 } = require("uuid");
-const Transaction = require("./models/Transaction");
 
 const app = express();
 app.use(express.json());
 
-/* ------------------ DATABASE CONNECT ------------------ */
+/* ---------------- MEMORY STORAGE ---------------- */
+/* WARNING: Will reset when Render restarts */
+const transactions = {};
 
-mongoose.connect(process.env.MONGO_URI)
-  .then(() => console.log("MongoDB Connected"))
-  .catch(err => console.log(err));
-
-/* ------------------ KHQR GENERATOR ------------------ */
+/* ---------------- KHQR GENERATOR ---------------- */
 
 function generateKHQR(amount, txnId) {
   let payload = "";
@@ -47,21 +43,26 @@ function generateKHQR(amount, txnId) {
   return payload + crcValue;
 }
 
-/* ------------------ CREATE PAYMENT ------------------ */
+/* ---------------- CREATE PAYMENT ---------------- */
 
 app.post("/create-payment", async (req, res) => {
   try {
     const { amount } = req.body;
+
+    if (!amount) {
+      return res.status(400).json({ error: "Amount required" });
+    }
 
     const txnId = uuidv4().replace(/-/g, "").substring(0, 12);
 
     const khqrString = generateKHQR(amount, txnId);
     const qrImage = await QRCode.toDataURL(khqrString);
 
-    await Transaction.create({
-      txnId,
-      amount
-    });
+    transactions[txnId] = {
+      amount,
+      status: "PENDING",
+      createdAt: Date.now()
+    };
 
     res.json({
       success: true,
@@ -74,12 +75,10 @@ app.post("/create-payment", async (req, res) => {
   }
 });
 
-/* ------------------ CHECK PAYMENT ------------------ */
+/* ---------------- CHECK PAYMENT ---------------- */
 
-app.get("/check-payment/:txnId", async (req, res) => {
-  const { txnId } = req.params;
-
-  const txn = await Transaction.findOne({ txnId });
+app.get("/check-payment/:txnId", (req, res) => {
+  const txn = transactions[req.params.txnId];
 
   if (!txn) {
     return res.status(404).json({ status: "NOT_FOUND" });
@@ -90,20 +89,32 @@ app.get("/check-payment/:txnId", async (req, res) => {
   });
 });
 
-/* ------------------ SIMULATE PAYMENT (TEST ONLY) ------------------ */
+/* ---------------- SIMULATE PAYMENT (TEST ONLY) ---------------- */
 
-app.post("/simulate-payment/:txnId", async (req, res) => {
-  const { txnId } = req.params;
+app.post("/simulate-payment/:txnId", (req, res) => {
+  const txn = transactions[req.params.txnId];
 
-  await Transaction.updateOne(
-    { txnId },
-    { status: "PAID" }
-  );
+  if (!txn) {
+    return res.status(404).json({ error: "Transaction not found" });
+  }
+
+  txn.status = "PAID";
 
   res.json({ message: "Payment marked as PAID" });
 });
 
-/* ------------------ SERVER ------------------ */
+/* ---------------- AUTO CLEAN OLD TRANSACTIONS ---------------- */
+
+setInterval(() => {
+  const now = Date.now();
+  for (let txnId in transactions) {
+    if (now - transactions[txnId].createdAt > 15 * 60 * 1000) {
+      delete transactions[txnId];
+    }
+  }
+}, 60000);
+
+/* ---------------- START SERVER ---------------- */
 
 const PORT = process.env.PORT || 3000;
 app.listen(PORT, () => console.log(`Server running on ${PORT}`));
