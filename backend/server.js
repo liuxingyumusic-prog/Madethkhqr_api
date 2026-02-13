@@ -7,31 +7,43 @@ const { v4: uuidv4 } = require("uuid");
 const app = express();
 app.use(express.json());
 
-/* ---------------- MEMORY STORAGE ---------------- */
-/* WARNING: Will reset when Render restarts */
+/* ================= MEMORY STORAGE ================= */
 const transactions = {};
 
-/* ---------------- KHQR GENERATOR ---------------- */
+/* ================= HOME PAGE ================= */
+
+app.get("/", (req, res) => {
+  res.send(`
+    <h2>KHQR Payment Server Running 🚀</h2>
+    <p>Use POST /create-payment</p>
+  `);
+});
+
+/* ================= KHQR GENERATOR ================= */
 
 function generateKHQR(amount, txnId) {
   let payload = "";
 
-  payload += "000201"; // Format
-  payload += "010212"; // Dynamic QR
+  payload += "000201";
+  payload += "010212";
 
-  const merchantInfo = `0016A0000006770101110113${process.env.MERCHANT_ID}`;
+  const merchantId = "pichsomadeth_sorn1@bkrt";
+  const storeName = "MADETH STORE";
+  const city = "PHNOM PENH";
+
+  const merchantInfo = `0016A0000006770101110113${merchantId}`;
   payload += "29" + merchantInfo.length.toString().padStart(2, "0") + merchantInfo;
 
-  payload += "52045999"; // MCC
-  payload += "5303840";  // USD
+  payload += "52045999";
+  payload += "5303840";
   payload += "54" + amount.length.toString().padStart(2, "0") + amount;
   payload += "5802KH";
 
-  payload += "59" + process.env.STORE_NAME.length.toString().padStart(2, "0") + process.env.STORE_NAME;
-  payload += "60" + process.env.CITY.length.toString().padStart(2, "0") + process.env.CITY;
+  payload += "59" + storeName.length.toString().padStart(2, "0") + storeName;
+  payload += "60" + city.length.toString().padStart(2, "0") + city;
 
-  const additionalField = "05" + txnId.length.toString().padStart(2, "0") + txnId;
-  payload += "62" + additionalField.length.toString().padStart(2, "0") + additionalField;
+  const additional = "05" + txnId.length.toString().padStart(2, "0") + txnId;
+  payload += "62" + additional.length.toString().padStart(2, "0") + additional;
 
   payload += "6304";
 
@@ -43,7 +55,7 @@ function generateKHQR(amount, txnId) {
   return payload + crcValue;
 }
 
-/* ---------------- CREATE PAYMENT ---------------- */
+/* ================= CREATE PAYMENT ================= */
 
 app.post("/create-payment", async (req, res) => {
   try {
@@ -70,12 +82,12 @@ app.post("/create-payment", async (req, res) => {
       qrImage
     });
 
-  } catch (error) {
-    res.status(500).json({ error: error.message });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
   }
 });
 
-/* ---------------- CHECK PAYMENT ---------------- */
+/* ================= CHECK PAYMENT ================= */
 
 app.get("/check-payment/:txnId", (req, res) => {
   const txn = transactions[req.params.txnId];
@@ -84,37 +96,21 @@ app.get("/check-payment/:txnId", (req, res) => {
     return res.status(404).json({ status: "NOT_FOUND" });
   }
 
-  res.json({
-    status: txn.status
-  });
+  res.json({ status: txn.status });
 });
 
-/* ---------------- SIMULATE PAYMENT (TEST ONLY) ---------------- */
+/* ================= SIMULATE PAYMENT ================= */
 
-app.post("/simulate-payment/:txnId", (req, res) => {
-  const txn = transactions[req.params.txnId];
-
-  if (!txn) {
-    return res.status(404).json({ error: "Transaction not found" });
+app.get("/pay/:txnId", (req, res) => {
+  if (transactions[req.params.txnId]) {
+    transactions[req.params.txnId].status = "PAID";
+    res.send("Payment Marked as PAID ✅");
+  } else {
+    res.send("Transaction not found");
   }
-
-  txn.status = "PAID";
-
-  res.json({ message: "Payment marked as PAID" });
 });
 
-/* ---------------- AUTO CLEAN OLD TRANSACTIONS ---------------- */
-
-setInterval(() => {
-  const now = Date.now();
-  for (let txnId in transactions) {
-    if (now - transactions[txnId].createdAt > 15 * 60 * 1000) {
-      delete transactions[txnId];
-    }
-  }
-}, 60000);
-
-/* ---------------- START SERVER ---------------- */
+/* ================= START SERVER ================= */
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Server running on ${PORT}`));
+app.listen(PORT, () => console.log("Server running on " + PORT));
