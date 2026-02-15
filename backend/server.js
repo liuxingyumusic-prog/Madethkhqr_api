@@ -1,116 +1,56 @@
-require("dotenv").config();
-const express = require("express");
-const QRCode = require("qrcode");
-const crc = require("crc");
-const { v4: uuidv4 } = require("uuid");
+DELETE). If omitted, GET is the default.
+   2. `-H "<HEADER>"` or `--header "<HEADER>"`: Adds custom HTTP headers to the request. This is
+      crucial for sending Content-Type (e.g., application/json) or Authorization tokens.
+   3. `-d "<DATA>"` or `--data "<DATA>"`: Sends data in the request body for POST or PUT requests.
+      For JSON data, you typically combine this with -H 'Content-Type: application/json'.
+   4. `-i` or `--include`: Includes the HTTP response headers in the output. Useful for debugging.
+   5. `-v` or `--verbose`: Shows more detailed information about the request and response, including
+      connection details and headers.
+   6. `--json "<JSON_DATA>"`: A shorthand for -H 'Content-Type: application/json' -d '<JSON_DATA>'.
+      (Note: This might not be available in all curl versions, but is common in newer ones.)
 
-const app = express();
-app.use(express.json());
+  Examples for Your Backend API:
 
-/* ================= MEMORY STORAGE ================= */
-const transactions = {};
+  Assuming your server is running on http://localhost:3000 and API routes are prefixed with /api.
 
-/* ================= HOME PAGE ================= */
+  1. POST Request (Generate KHQR Code)
 
-app.get("/", (req, res) => {
-  res.send(`
-    <h2>KHQR Payment Server Running 🚀</h2>
-    <p>Use POST /create-payment</p>
-  `);
-});
 
-/* ================= KHQR GENERATOR ================= */
+  This endpoint creates a resource, so it uses POST. It doesn't require a body, but it does need a
+  Content-Type header even if the body is empty.
 
-function generateKHQR(amount, txnId) {
-  let payload = "";
 
-  payload += "000201";
-  payload += "010212";
+   1 curl -X POST \
+   2      -H 'Content-Type: application/json' \
+   3      http://localhost:3000/api/orders/someUserId123/generate_qrcode
 
-  const merchantId = "pichsomadeth_sorn1@bkrt";
-  const storeName = "MADETH STORE";
-  const city = "PHNOM PENH";
 
-  const merchantInfo = `0016A0000006770101110113${merchantId}`;
-  payload += "29" + merchantInfo.length.toString().padStart(2, "0") + merchantInfo;
+   * -X POST: Specifies the HTTP POST method.
+   * -H 'Content-Type: application/json': Tells the server that the request body (even if empty) is
+     expected to be JSON.
+   * http://localhost:3000/api/orders/someUserId123/generate_qrcode: The target URL, where
+     someUserId123 is a placeholder for your actual user ID.
 
-  payload += "52045999";
-  payload += "5303840";
-  payload += "54" + amount.length.toString().padStart(2, "0") + amount;
-  payload += "5802KH";
+  2. POST Request with Request Body (Check Payment Status)
 
-  payload += "59" + storeName.length.toString().padStart(2, "0") + storeName;
-  payload += "60" + city.length.toString().padStart(2, "0") + city;
 
-  const additional = "05" + txnId.length.toString().padStart(2, "0") + txnId;
-  payload += "62" + additional.length.toString().padStart(2, "0") + additional;
+  This endpoint also uses POST and requires data (the qr_md5) in the request body.
 
-  payload += "6304";
 
-  const crcValue = crc.crc16xmodem(payload)
-    .toString(16)
-    .toUpperCase()
-    .padStart(4, "0");
+   1 curl -X POST \
+   2      -H 'Content-Type: application/json' \
+   3      -d '{ "qr_md5": "your_qr_md5_hash_here" }' \
+   4      http://localhost:3000/api/orders/someUserId123/check_payment
 
-  return payload + crcValue;
-}
 
-/* ================= CREATE PAYMENT ================= */
+   * -X POST: Specifies the HTTP POST method.
+   * -H 'Content-Type: application/json': Important for JSON data in the body.
+   * -d '{ "qr_md5": "your_qr_md5_hash_here" }': Sends a JSON object as the request body. Replace
+     your_qr_md5_hash_here with the actual MD5 hash from a generated QR code.
+   * http://localhost:3000/api/orders/someUserId123/check_payment: The target URL.
 
-app.post("/create-payment", async (req, res) => {
-  try {
-    const { amount } = req.body;
+  ---
 
-    if (!amount) {
-      return res.status(400).json({ error: "Amount required" });
-    }
 
-    const txnId = uuidv4().replace(/-/g, "").substring(0, 12);
-
-    const khqrString = generateKHQR(amount, txnId);
-    const qrImage = await QRCode.toDataURL(khqrString);
-
-    transactions[txnId] = {
-      amount,
-      status: "PENDING",
-      createdAt: Date.now()
-    };
-
-    res.json({
-      success: true,
-      txnId,
-      qrImage
-    });
-
-  } catch (err) {
-    res.status(500).json({ error: err.message });
-  }
-});
-
-/* ================= CHECK PAYMENT ================= */
-
-app.get("/check-payment/:txnId", (req, res) => {
-  const txn = transactions[req.params.txnId];
-
-  if (!txn) {
-    return res.status(404).json({ status: "NOT_FOUND" });
-  }
-
-  res.json({ status: txn.status });
-});
-
-/* ================= SIMULATE PAYMENT ================= */
-
-app.get("/pay/:txnId", (req, res) => {
-  if (transactions[req.params.txnId]) {
-    transactions[req.params.txnId].status = "PAID";
-    res.send("Payment Marked as PAID ✅");
-  } else {
-    res.send("Transaction not found");
-  }
-});
-
-/* ================= START SERVER ================= */
-
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log("Server running on " + PORT));
+  Remember to replace placeholders like someUserId123 and your_qr_md5_hash_here with actual values
+  relevant to your scenario.
